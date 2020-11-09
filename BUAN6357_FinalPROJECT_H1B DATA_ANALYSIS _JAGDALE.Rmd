@@ -1,0 +1,389 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+
+
+
+TOPIC - H1B Data Anlayis and Prediction
+
+Summary 
+H-1B visas are a category of employment-based, non-immigrant visas for temporary foreign workers in the United States. For a foreign national to apply for H1-B visa, a US employer must offer them a job and submit a petition for a H-1B visa to the US immigration department. 
+The Reason I finalized this topic was because there have been a lot hoopla and misconceptions surrounding H1b visa and wanted to explore this domain in order to get the exact mathematical results in orders to test the feasibility of various information provided on online platform and understand what factors affect the H1b visas and also what are the best jobs and companies that get the most H1b sponsered.H1b dataset contains 6 years of datset from 2011 to 2016.
+I acquired the dataset from Office of Foreign Labor Certification (OFLC) websitethe following source: https://www.foreignlaborcert.doleta.gov/performancedata.cfm.I started with the Exploratry data analysis whih included detecting missing values, Visualization of data based on various parameters such as salary distribution ,top employers, jobs with most opportubities etc. I further continued with feature engineering and data cleaning and finally buit classification model for prediction. 
+
+
+```{r}
+library(plyr)
+library(tibble)
+library(ggplot2)
+library(lubridate)
+library(DT)
+library(data.table)
+library(tidyverse)
+library(pacman)
+library(corrplot)
+library(caret)
+
+```
+Running the required library
+
+
+```{r}
+h1b<-fread('h1b.csv')
+```
+We read the dataset using Fread command which helps you read the data set quickly instead of using read.csv
+Exploratory Data Analysis
+
+```{r}
+head(h1b)
+```
+We see the overall dataset
+
+```{r}
+str(h1b)
+```
+We see that the dataset contains around 3 million observation and 11 variable in the data set. The dataset description is as follows:
+
+CASE_STATUS - Status is associated with the last significant update. 
+EMPLOYER_NAME - Name of the employers filing for petitions. 
+SOC_NAME -Occupational name.
+JOB Title - Titles of different jobs 
+FULL_TIME_POSITION - If the position is full time or not.
+PREVAILING_WAGE - average wage paid to similarly employed workers in the area of intended employment. 
+YEAR -Year for filing the petition. 
+WORKSITE - City and State information. 
+Lon - Longitude of the worksite 
+Lat - Latitude of the worksite 
+
+```{r}
+summary(h1b)
+```
+Here we observe that except year, prevailing wages, lattitude and longitutde evrything variable is character. Also lat and lon contains lot of nan values. 
+
+```{r}
+h1b <- na.omit(h1b)
+summary(h1b)
+```
+I decided to omit all the nan values as all the nan values were less than 10% of the no. of values of the variables
+
+```{r}
+CASE_STATUS <- as.factor(h1b$CASE_STATUS)
+plot(CASE_STATUS, xlab= "CASE STATUS" , ylab= 'Cases')
+```
+From above graph we can say that maximum of the classes belong to certified class through which we can conclude that the data is imbalance.This being our target variable reuires work to be done upon. During the featire enngineerg part we will look into this. 
+
+```{r}
+ggplot(h1b, aes(fill=CASE_STATUS, x= FULL_TIME_POSITION)) + geom_bar() +labs(y= 'NO. of cases' , x= 'case status')
+
+```
+
+Here we see that maximum appicants lie in the full time zone and also maximum cases are certified 
+
+```{r}
+ggplot(h1b, aes(fill=CASE_STATUS, x= YEAR)) + geom_bar() +labs(y= 'NO. of cases' , x= 'case status')
+
+```
+Here we see that as soon as the time increases the h1b visas also increse from 2011 to 2016
+
+```{r}
+h1b$EMPLOYER_NAME <- factor(h1b$EMPLOYER_NAME)
+Top_Sponser <- as.data.frame(h1b %>% group_by(EMPLOYER_NAME) %>%
+                              summarise(count = n(), percent = round(count*100/nrow(h1b),1)) %>% 
+                              arrange(desc(count))%>% 
+                              top_n(10, wt = count))
+
+ggplot(data = Top_Sponser, aes(x = reorder(EMPLOYER_NAME, percent),
+                                y = percent, fill = EMPLOYER_NAME)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = percent), vjust = 1.1, hjust = 1.2) + 
+    labs(x = "EMPLOYER_NAME", y = "Petitions Made(in percentage)")  + 
+    theme(legend.position = "none") +
+    coord_flip()
+```
+From the above graph we see that top companies that sponser h1b are indian companies getting into these companies incresaes the chance of getting h1b sponsered.
+
+```{r}
+h1b$JOB_TITLE <- factor(h1b$JOB_TITLE)
+best_jobs <- as.data.frame(h1b %>% group_by(JOB_TITLE) %>%
+                              summarise(count = n(), percent = round(count*100/nrow(h1b),1)) %>% 
+                              arrange(desc(count))%>% 
+                              top_n(10, wt = count))
+
+ggplot(data = best_jobs, aes(x = reorder(JOB_TITLE, percent),
+                                y = percent, fill = JOB_TITLE)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = percent), vjust = 1.2, hjust = 1.4) + 
+    labs(x = "JOBS", y = "No, of Petitions ") + 
+    theme(legend.position = "none") +
+    coord_flip()
+```
+From the above graph we see that the best job of getting h1b sponsered are analyst roles therefore getting into this domain help you getting sponsered better than others
+
+```{r}
+ggplot(data = subset(h1b, h1b$PREVAILING_WAGE < quantile(h1b$PREVAILING_WAGE, 0.99, na.rm = T)),
+       aes(x = PREVAILING_WAGE/1000)) +
+    geom_histogram(binwidth = 2.5) +
+    scale_x_continuous(breaks = seq(0,150,25)) +
+    scale_y_continuous(breaks = seq(0,500000,25000)) +
+    labs(x = "Salary IN Us Dollers )", y = " petitions")
+
+```
+The above graph shows that maximum applicants lie between 50K to 75k zone . so Even Having H1b Sponsered does not gurranty good salary
+
+```{r}
+h1b$WORKSITE <- factor(h1b$WORKSITE)
+Best_location <- as.data.frame(h1b %>% group_by(WORKSITE) %>%
+                summarise(count = n(), percent = round(count*100/nrow(h1b),1)) %>% 
+                arrange(desc(count))%>% 
+                top_n(15, wt = count))
+
+ggplot(data = Best_location, aes(x = reorder(WORKSITE, percent),
+                                y = percent, fill = WORKSITE)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = percent), vjust = 1.2, hjust = 1.) + 
+    labs(x = "WORKSITE", y = "Petitions ") + 
+    scale_y_continuous(breaks = seq(0,7,1)) +
+    theme(legend.position = "none") +
+    coord_flip()
+```
+The above graph shows that califoria has the largest no. of people getiing h1b sponsered. Belonging to this state provides you a better opprtunity than others
+
+```{r}
+chisq.test(h1b$CASE_STATUS, h1b$SOC_NAME, correct= F)
+```
+When we run the chi square for SOC_NAME We see that it is significant as p value is less 1%
+
+```{r}
+chisq.test(h1b$CASE_STATUS, h1b$YEAR, correct= F)
+```
+When we run the chi square for YEAR We see that it is significant as p value is less 1%
+```{r}
+chisq.test(h1b$CASE_STATUS, h1b$JOB_TITLE, correct= F) 
+```
+When we run the chi square for JOB TITLE We see that it is significant as p value is less 1%
+```{r}
+chisq.test(h1b$CASE_STATUS, h1b$FULL_TIME_POSITION, correct= F)
+```
+When we run the chi square for FULL TIME POSITION We see that it is significant as p value is less 1%
+
+```{r}
+chisq.test(h1b$CASE_STATUS, h1b$EMPLOYER_NAME, correct= F)
+```
+When we run the chi square for EMPLOYERS NAME  We see that it is significant as p value is less 1%
+
+
+Data Preparation 
+
+
+```{r}
+n<- dim(h1b)[1]
+n
+h1b.data1 <- h1b[1:(n-2857783)]
+h1b.data1
+```
+
+After trying multiple times to run the classification model on 3 million roles i was unable to get the result so in order run the classfication model i cut down the dataset to 20000 rows to run the classification model.
+
+
+There are lot of values in EMPLOYEE NAME , Even if we divide them into category it will not be feasable to use in the model there I decided to make a column containing top 5 companies, University name an otheres. From the Domain knowledge i got that If a person studies from the university in US he has a better chances of getting certified and sponsered therfore i decided to capture university.
+```{r}
+h1b.data1$TOP_Sponsers  <- NA
+```
+We create a new column with nan values
+
+```{r}
+h1b.data1$EMPLOYER_NAME <- tolower(h1b.data1$EMPLOYER_NAME)
+```
+in order to extract our required information we need to convert them into lower case letter. From the above code we did the reuired
+```{r}
+h1b.data1$TOP_Sponsers[grep("University",h1b.data1$EMPLOYER_NAME, ignore.case = T)]<-"University"
+```
+We map the univeristy name into new column. All the strings that contain university are converted into common name "University"
+
+```{r}
+h1b.data1$TOP_Sponsers[grep("infosys",h1b.data1$EMPLOYER_NAME, ignore.case = T)]<-"Top 5"
+h1b.data1$TOP_Sponsers[grep("wipro",h1b.data1$EMPLOYER_NAME, ignore.case = T)]<-"Top 5"
+h1b.data1$TOP_Sponsers[grep("ibm",h1b.data1$EMPLOYER_NAME, ignore.case = T)]<-"Top 5"
+h1b.data1$TOP_Sponsers[grep("deloitte",h1b.data1$EMPLOYER_NAME, ignore.case = T)]<-" Top 5"
+h1b.data1$TOP_Sponsers[grep("tata",h1b.data1$EMPLOYER_NAME, ignore.case = T)]<-"Top 5"
+```
+We map the top 5 company that sponser h1b into new column. All the strings that contain top 5 company name are converted into common name "Top 5"
+
+```{r}
+
+h1b.data1$TOP_Sponsers[is.na(h1b.data1$TOP_Sponsers)] <- "others"
+```
+Rest of the nan values are conveted into others 
+
+
+SOC_Name Contains a lot of unique values there so i divided the column into group that of containg job of similar domain as mentioned below . For exam computer and database are grouptogther into cs/it. Similary math ans stats are grouped together into maths group.
+```{r}
+h1b.data1$Imp_occupation <-NA
+h1b.data1$SOC_NAME <- tolower(h1b.data1$SOC_NAME)
+h1b.data1$Imp_occupation[grep('computer','programmer',h1b.data1$SOC_NAME, ignore.case = T)]<-"CS/IT"
+h1b.data1$Imp_occupation[grep('database',h1b.data1$SOC_NAME, ignore.case = T)]<-"CS/IT"
+h1b.data1$Imp_occupation[grep('software','web developer',h1b.data1$SOC_NAME, ignore.case = T)]<-"CS/IT"
+h1b.data1$Imp_occupation[grep('math','statistic',h1b.data1$SOC_NAME, ignore.case = T)]<-"Maths"
+h1b.data1$Imp_occupation[grep('predictive model','stats',h1b.data1$SOC_NAME, ignore.case = T)]<-"Maths"
+h1b.data1$Imp_occupation[grep('teacher','linguist',h1b.data1$SOC_NAME, ignore.case = T)]<-"Teacher"
+h1b.data1$Imp_occupation[grep('professor','Teach',h1b.data1$SOC_NAME, ignore.case = T)]<-"Taecher"
+h1b.data1$Imp_occupation[grep('school principal',h1b.data1$SOC_NAME, ignore.case = T)]<-"Teacher"
+h1b.data1$Imp_occupation[grep('medical','doctor',h1b.data1$SOC_NAME, ignore.case = T)]<-"Medical"
+h1b.data1$Imp_occupation[grep('physician','dentist',h1b.data1$SOC_NAME, ignore.case = T)]<-"Medical"
+h1b.data1$Imp_occupation[grep('Health','Physical Therapists',h1b.data1$SOC_NAME, ignore.case = T)]<-"Medical"
+h1b.data1$Imp_occupation[grep('medical','doctor',h1b.data1$SOC_NAME, ignore.case = T)]<-"Medical"
+h1b.data1$Imp_occupation[grep('surgeon','nurse',h1b.data1$SOC_NAME, ignore.case = T)]<-"Medical"
+h1b.data1$Imp_occupation[grep('psychiatr',h1b.data1$SOC_NAME, ignore.case = T)]<-"Medical"
+h1b.data1$Imp_occupation[grep('chemist','physicist',h1b.data1$SOC_NAME, ignore.case = T)]<-"Science"
+h1b.data1$Imp_occupation[grep('biology','scientist',h1b.data1$SOC_NAME, ignore.case = T)]<-"Science"
+h1b.data1$Imp_occupation[grep('biology','clinical research',h1b.data1$SOC_NAME, ignore.case = T)]<-"Science"
+h1b.data1$Imp_occupation[grep('public relation','manager',h1b.data1$SOC_NAME, ignore.case = T)]<-"Management"
+h1b.data1$Imp_occupation[grep('management','operation',h1b.data1$SOC_NAME, ignore.case = T)]<-"Management"
+h1b.data1$Imp_occupation[grep('chief','plan',h1b.data1$SOC_NAME, ignore.case = T)]<-"Management"
+h1b.data1$Imp_occupation[grep('executive',h1b.data1$SOC_NAME, ignore.case = T)]<-"Management"
+h1b.data1$Imp_occupation[grep('promotion','market research',h1b.data1$SOC_NAME, ignore.case = T)]<-"Marketing"
+h1b.data1$Imp_occupation[grep('advertis','marketing',h1b.data1$SOC_NAME, ignore.case = T)]<-"Marketing"
+h1b.data1$Imp_occupation[grep('business systems analyst',h1b.data1$SOC_NAME, ignore.case = T)]<-"Business"
+h1b.data1$Imp_occupation[grep('business','business analyst',h1b.data1$SOC_NAME, ignore.case = T)]<-"Business"
+h1b.data1$Imp_occupation[grep('accountant','finance',h1b.data1$SOC_NAME, ignore.case = T)]<-"Finance"
+h1b.data1$Imp_occupation[grep('engineer','architect',h1b.data1$SOC_NAME, ignore.case = T)]<-"Architecture"
+h1b.data1$Imp_occupation[grep('surveyor','carto',h1b.data1$SOC_NAME, ignore.case = T)]<-"Architecture"
+h1b.data1$Imp_occupation[grep('financial',h1b.data1$SOC_NAME, ignore.case = T)]<-"Finance"
+h1b.data1$Imp_occupation[grep('technician','drafter',h1b.data1$SOC_NAME, ignore.case = T)]<-"Architecture"
+h1b.data1$Imp_occupation[grep('information security',h1b.data1$SOC_NAME, ignore.case = T)]<-"Architecture"
+h1b.data1$Imp_occupation[is.na(h1b.data1$Imp_occupation)] <- "others"
+
+```
+The above result covers almost 75% of the column and rest nan values are filled with others 
+
+```{r}
+h1b.data1<-separate(data = h1b.data1, col = WORKSITE, into = c("CITY", "STATE"), sep = ",")
+```
+As the H1b is more dependent on state rather than city therefore i divided the worksite into city and state as mentioned above.We will caputre state in our model
+
+```{r}
+h1b.data1$CASE_STATUS<-ifelse(h1b.data1$CASE_STATUS %in% c("CERTIFIED"),"1","0")
+```
+I decided to use binary clssification for my model therefore converted my target variable into two classes of 0 and 1. 1 BEING CERTFIED AND 0 being denied 
+```{r}
+h1b.data1 <- h1b.data1 %>% select(-c (EMPLOYER_NAME, CITY, SOC_NAME, JOB_TITLE,YEAR,V1))
+h1b.data1 <- h1b.data1 %>% select(-c (lon, lat))
+```
+Dropping column which are lot reuired in the datset for classification
+
+```{r}
+h1b.data1$CASE_STATUS <- as.factor(h1b.data1$CASE_STATUS)
+h1b.data1$FULL_TIME_POSITION <- as.factor(h1b.data1$FULL_TIME_POSITION)
+h1b.data1$TOP_Sponsers <- as.factor(h1b.data1$TOP_Sponsers)
+h1b.data1$STATE<- as.factor(h1b.data1$STATE)
+h1b.data1$Imp_occupation <- as.factor(h1b.data1$Imp_occupation)
+```
+Converting the columns into factor for classification
+```{r}
+summary(h1b.data1)
+
+```
+As we  see the summary we only have 6 variable left and now we will perform our Classiffication on them.
+
+
+################### Machine learning model####################
+
+
+```{r}
+inTrain <- createDataPartition(y = h1b.data1$CASE_STATUS,p = .7, list = FALSE,times=1 )
+train1 <- h1b.data1[inTrain,]
+test1<- h1b.data1[-inTrain,]
+```
+Spliting the dataet in to train and test 70% train and 30% test
+
+
+
+
+SVM 
+An svm is a discriminative clasisifer which uses hyperplane as its classifier. In other words, , the algorithm gives an optimal hyperplane which categorizes the data. In two dimentional space this hyperplane is a line dividing a plane in two parts where in each class lay in both side.
+
+
+
+1. SVM Linear -
+The following code we run 3 fold croos vaidation to get the value of c then we run Support vector linear.
+```{r}
+train_control <- trainControl(method = 'cv', number = 3, verboseIter = T)
+set.seed(100)
+model1 <- train(CASE_STATUS~., data = train1, method = "svmLinear", trControl = train_control)
+model1
+```
+
+The cross validation provides the value of c=1 
+
+```{r eval=FALSE, include=FALSE}
+```
+
+
+```{r eval=FALSE, include=FALSE}
+```
+
+
+```{r eval=FALSE, include=FALSE}
+model1test<- predict(object=model1,newdata=test1)
+```
+Now we make predictions based on the value we get from cross validation
+
+```{r eval=FALSE, include=FALSE}
+confusionMatrix(data=model1test,reference=test1$CASE_STATUS,positive="1")
+
+```
+BASED ON MY RESULTS FROM THE CROSS- VALIDATION, I RAN THE CONFUSION MATRIX AND WE CAN SEE THE RESULTS ARE REALLY GOOD. THIS GAVE ME A GOOD IDEA ON MY DATA SET AND WE CAN SEE THE ALGORITHM IS WORKING REALLY GREAT ON MY TEST DATA SET.
+
+THE ACCURACY HERE IS ~ 86% AND WHICH IS REALLY GOOD AND THIS MODEL CAN BE USED FOR FUTURE PREDICTIONS. ALSO, THE MCNEMARS'S P-VALUE IS SIGNIFICANT AND WE CAN USE THIS AS OUR RESULT FOR FURTHER ANALYSIS.
+
+
+
+
+SVM RAIDAL 
+
+```{r}
+model2 <- train(CASE_STATUS~., data = train1, method = "svmRadial", trControl = train_control)
+model2
+```
+```{r}
+model2test<- predict(object=model2,newdata=test1)
+```
+NOW, WHEN I TRIED TO RUN THE SAME PROBLEM WITH DIFFERENT DIFFERENT VALUE OF C, I CAN SEE THAT THE ACCURACY HAS INCREASED TO ~86%. hERE, AS PLAY MORE WITH POUR VALUES OF C, THE BETTER THE RESULTS WE SEE. 
+
+THIS GAVE MA GOOD IDEA ON THE TOPICS I COVERED IN THIS SUBJECT AND HOW I CAN USE THE SAME ALGORITHMS, IN THE REAL LIFE. IT IS REALLY A GOOD LEARNING
+
+
+```{r}
+confusionMatrix(data=model2test,reference=test1$CASE_STATUS,positive="1")
+```
+
+
+Random FOREST
+Random forest consists of a large number of individual decision trees that operate as an ensemble. Each individual tree in the random forest spits out a class prediction and the class with the most votes becomes our model's prediction
+ 
+
+```{r}
+model3 <- train(CASE_STATUS~., data = train1, method = "rf", trControl = train_control)
+model3
+```
+
+```{r}
+model3test<- predict(object=model3,newdata=test1)
+```
+
+```{r}
+confusionMatrix(data=model3test,reference=test1$CASE_STATUS,positive="1") 
+```
+NOW, WHEN I TRIED TO RUN THE SAME PROBLEM With RANDOM FOREST, WE CAN SEE THAT THE ACCURACY COMES OUT TO BE 86.2 WHICH IS SIMILAR TO SVM LINEAR 
+
+FROM THE ABOVE MODEL THE BEST PREDICTION IS OF SVM RADIAL. WE CAN USE VARIOUS OTHER MODEL FOR FURTHER ANALYSIS SUCH AS XGBOOST, KNN etc
+
+REFERENCES : 
+https://towardsdatascience.com/how-much-do-data-scientists-make-cbd7ec2b458
+https://towardsdatascience.com/predicting-h-1b-status-using-random-forest-dc199a6d254c
+https://webpages.uncc.edu/sshinde5/ 
